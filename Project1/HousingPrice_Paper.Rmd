@@ -1,0 +1,664 @@
+---
+title: "Housing Market - Seattle Area"
+author: "Anti-Code Group"
+date: "10/5/2019"
+output:  
+    rmdformats::readthedown:
+      toc_float: true
+      number_sections: true
+      includes:
+        before_body: header.html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 999, digits = 3, big.mark=",", warn = -1)
+```
+
+```{r basicfunct, include=FALSE}
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+```
+
+```{r base_lib, include=FALSE}
+loadPkg("dplyr")
+loadPkg("tidyr")
+loadPkg("tidyverse")
+loadPkg("ggplot2")
+loadPkg('ggmap')
+loadPkg('rjson')
+loadPkg('jsonlite')
+loadPkg('leaflet')
+loadPkg('grDevices')
+loadPkg('scales')
+loadPkg('RCurl')
+loadPkg('sp')
+loadPkg('geojsonio')
+loadPkg('lmtest')
+loadPkg("faraway")
+loadPkg("corrplot")
+loadPkg("modelr")
+loadPkg('DT')
+loadPkg('plotly')
+loadPkg('rmdformats')
+```
+
+# Chapter 1: Introduction
+
+Seattle boasts among the "hottest" housing markets in the United States; as of [July 2018](https://bit.ly/2v5UMcn), Seattle "led the nation in home price gains" for 21 straight months, topped only by Portland in the 1990s – a trend driven by the city's tech sector and a  lack of supply compared with demand. Given the Seattle housing market's notoriety for high prices, we were interested in exploring which variables affect housing price in this market. With this goal in mind, we found a public dataset on Kaggle ("House Sales in King County, USA") offering 21,613 observations across 21 variables. According to Kaggle, it "includes homes sold between May 2014 and May 2015." Although it doesn't explore macro-level variables affecting housing price (such as the local job market, Amazon presence, etc.), it does focus on micro-level variables, such as renovations, number of bedrooms, square feet of living space, etc. that are common to virtually all housing markets in the United States. As a result, our analysis could lay the groundwork for future comparative analysis with other housing markets across the country.
+
+This report is organized as follows:
+
+1. Description of the Data (explanation of the dataset and its variables, 
+2. Geographic Coverage of Data
+3. Independent Variables EDA: Slicing the Data for an Overview
+4. Independent Variables EDA: Boxplots, Scatterplots, ANOVA, & Chi-Square
+5. Multiple Linear Regression Model
+6. Conclusion
+
+# Chapter 2: Description of the Data
+## Source Data
+
+As mentioned previously, our dataset houses 21,613 observations across 21 variables. (See below for a readout of the dataset's structure and variable names.) Variable descriptions are as follows and come from the following [link](https://bit.ly/2MsyRFl); astericks next to variable name indicates usage in our analysis:
+
+```{r, echo=FALSE}
+kc_house_data <- read.csv("kc_house_data.csv")
+str(kc_house_data)
+```
+
+1. Id (unique ID for each home sold)
+2. Date (date of the home sale)
+3. Price (price of each home sold)***
+4. Bedrooms (number of bedrooms)***
+5. Bathrooms (number of bathrooms, where .5 accounts for a room with a toilet but no shower)
+6. Sqft_living (square footage of the apartments' interior living space)***
+7. Sqft_lot (square footage of the land space)***
+8. Floors (number of floors)
+9. Waterfront (a dummy variable for whether the apartment was overlooking the waterfront or not; 0 represents no waterfront)
+10. View (an index from 0 to 4 of how the view of the property was)
+11. Condition (an index from 1 to 5 on the condition of the apartment, with the lowest number representing poor condition)***
+12. Grade (an index from 1 to 13, with the lowest number representation poor construction and design)***
+13. Sqft_above (the the square footage of the interior housing space that is above ground level)
+14. Sqft_basement (the square footage of the interior housing space that is below ground level)
+15. yr_built (the year the house was initially built)***
+16. yr_renovated (the year of the house's last renovation)***
+17. zipcode (what zipcode area the house is in)***
+18. Lat (latitude)***
+19. Long (longitude)***
+20. Sqft_living15 (the square footage of the interior housing living space for the nearest 15 neighbors)
+21. Sqft_lot15 (the square footage of the land lots of the nearest 15 neighbors)
+
+For our exploratory data analysis, we ignored "Id" and "Date" because these are independent variables with no relation to price. We also ignored "floors" because it can be considered a proxy for sqft_living. "Waterfront" and "View" were dropped because the vast majority of properties were coded as "0". We ignored sqft_basement and sqft_above because they were corollaries of "sqft_living" (we didn't want redundancy in our analysis). We also ignored "sqft_living 15" and "sqft_lot15" because we were interested only in the attributes of individual houses, not those of their surrounding neighborhoods for our initial EDA.
+
+Following these decisions, we cleaned the data accordingly: we dropped "waterfront" and "view"; we subsetted the dataset to include only properties with more than 0 bedrooms and bathrooms (we considered these "outlier" properties); we subsetted the dataset to include only properties with less than 30 bedrooms (given the likely mistake of recording that many rooms in much smaller houses in terms of sqft); we dropped "NA" values from the dataset to simplify our analysis ("NA" values are hard to perform operations on); we converted "condition" and "grade" into factor variables because they are effectively intervals; and we ran "housing price" through a logarithmic function to make for better visualization.
+
+```{r clean, include=FALSE}
+kc_house_data <- subset(kc_house_data, select = -c(9, 10))
+
+kc_house_data <- subset(kc_house_data, kc_house_data$bedrooms != 0)
+
+kc_house_data <- subset(kc_house_data, kc_house_data$bathrooms != 0)
+
+kc_house_data <- subset(kc_house_data, kc_house_data$bedrooms < 30)
+
+kc_house_data <-  drop_na(kc_house_data)
+
+kc_house_data$condition <- as.factor(kc_house_data$condition)
+
+kc_house_data$grade <- as.factor(kc_house_data$grade)
+
+price.ln = log(kc_house_data$price)
+
+```
+
+
+## Geographic Coverage of Data
+Below is a visualization of the points in the dataset by price, plotted with the leaflet library.
+Note that the data have been divided by unequal bins to provide a better visualization of the distribution of housing price, so please read the legend carefully. More expensive houses tend to be concentrated near the water and center of the city.
+ 
+```{r geo, echo=FALSE}
+price.bins <- c(0, 250000, 500000, 750000, 1000000, 1250000, 1500000, 1750000, 2000000, 8000000)
+qpal <-  colorBin(palette = 'GnBu', kc_house_data$price, bins= price.bins, n = 9)
+house.map1 <- leaflet(kc_house_data) %>% 
+  addProviderTiles("CartoDB.Positron") %>% 
+  addCircleMarkers(lng = ~long, lat = ~lat, 
+                   stroke = FALSE, 
+                   fillOpacity = 5, 
+                   color = ~qpal(price), 
+                   radius = 2,
+                   label = ~as.character(paste0('Price: $', price, ", ", 'condition: ', condition, ", ", 'year built: ', yr_built, 'Sqft living: ', sqft_living))) %>%
+  addLegend('bottomright', pal = qpal, values = ~price, opacity = 1, title = 'Price', labFormat = labelFormat(prefix = '$', between = ' - $'))
+
+house.map1
+
+```
+
+Here instead is a visualization of the observations by property lot sqft. Again, data have been divided by unequal bins to provide a better visualization of the distribution of housing price, so please read the legend carefully. Our observation follows common sense: the further one ventures outside the city center, the more land there is.
+
+```{r geo2, echo=FALSE}
+
+sqft.bins <- c(500,10000,200000,400000,660856, 1651359)
+
+qpal <-  colorBin(palette = 'YlOrBr', kc_house_data$sqft_lot, bins= sqft.bins, n = 5)
+house.map2 <- leaflet(kc_house_data) %>% 
+  addProviderTiles("CartoDB.DarkMatter") %>% 
+  addCircleMarkers(lng = ~long, lat = ~lat, 
+                   stroke = FALSE, 
+                   fillOpacity = 5, 
+                   color = ~qpal(sqft_lot), 
+                   radius = 2,
+                   label = ~as.character(paste0('Sqft_lot: ', sqft_lot, ", ", 'condition: ', condition, ", ", 'year built: ', yr_built, 'price: $', price))) %>%
+  addLegend('bottomright', pal = qpal, values = ~sqft_lot, opacity = 1, title = 'Sqft_lot', labFormat = labelFormat( between = ' - '))
+
+house.map2
+
+```
+
+
+
+# Chapter 3: Independent Variables EDA: Slicing the Data for an Overview
+## House Price Distribution
+
+```{r, include=FALSE}
+summary(kc_house_data$price)
+
+print(mean(kc_house_data$price))
+
+print(sd(kc_house_data$price))
+
+print(var(kc_house_data$price))
+
+```
+
+A brief overview of the dataset yields the following observations for housing price: the minimum price is \$78,000, while the maximum is \$7,700,000 (quite a large range); the mean of the dataset is \$540,198 (indicating that the dataset is right-skewed, as further indicated by the histogram below); the standard deviation of the dataset is \$367,142; and the variance is 134,792,956,735 (quite large, indicating ["that the data points are very spread out from the mean, and from one another"](https://bit.ly/2MZ1cCn).
+
+```{r price hist, echo=FALSE}
+
+hist(kc_house_data$price[kc_house_data$price<=2000000], xaxt="n", ylim = c(0,5000), col = heat.colors(20), main = "Housing Price Histogram, $0-$2M Only", xlab = "Housing Price ($)", cex.axis = .75)
+axis(side=1, at=axTicks(1), 
+     labels=formatC(axTicks(1), format="d", big.mark=','))
+
+qqnorm(kc_house_data$price, pch = 20, cex = .5, main = "Housing Prices: Normal Q-Q Plot", ylab = "Housing Price ($)", cex.axis = .75)
+
+```
+   
+Just for context, the following readouts offer cross sections of Seattle's most expensive houses; average prices for each condition level; and average prices for each grade level.
+
+### What do the most expensive houses look like?
+
+From slicing the data, it looks like the most expensive houses are very well constructed, have tens of thousands of square feet of property, and have 5 or more bedrooms.
+
+```{r top price, echo=FALSE}
+top1 <- top_n(kc_house_data, 5, price) %>% arrange(desc(price))
+datatable(top1, rownames = FALSE, options = list(pageLength = 5, scrollX=T))
+```
+
+### What is the average price for each condition level?
+
+From the slice below, average prices seem to trend upward along with condition; average prices are in the hundreds of thousands.
+
+```{r rop avg cond, echo=F}
+print(aggregate(price~condition,data=kc_house_data,FUN=mean))
+
+```
+
+### What is the average price for each grade level?
+
+From the slice below, we can see that price generally trends upward along with grade.
+
+```{r rop avg grade, echo=F}
+print(aggregate(price~grade,data=kc_house_data,FUN=mean))
+
+```
+
+## Bedrooms, sqft_lot, & sqft_living
+
+Below we have included histograms for "bedrooms", "sqft_living", and "sqft_lot". Upon inspecting the graphs, it becomes clear that most of the properties in this dataset have around 3 bedrooms, while the majority of properties are around 1000-2000 square feet (for reference, in 2015, the average [US house size](https://bit.ly/32zY9Hi) was around 2,600 square feet); as for sqft_lot, most of the properties have between 5,000 and 10,000 square feet of land. As with the housing price histogram shown earlier, these histograms are right-skewed.
+
+```{r bedroom hist, echo=FALSE}
+
+hist(kc_house_data$bedrooms[kc_house_data$bedrooms<=6], col = "chartreuse1", cex.axis = .75, xlab = "# Bedrooms", main = "# of Bedrooms Histogram")
+
+```
+
+```{r sqft_living hist, echo=FALSE}
+
+hist(kc_house_data$sqft_living[kc_house_data$sqft_living<=6000], col = heat.colors(12), cex.axis = .75, xlab = "Sqft Living", main = "Sqft Living Histogram")
+
+```
+
+```{r lot hist, echo=FALSE}
+
+hist(kc_house_data$sqft_lot[kc_house_data$sqft_lot<=25000], xaxt="n", cex.axis = .75, xlab = "Land Area (sqft.)", main = "Histogram of Land Area, up to 25,000 sqft.", col = heat.colors(13))
+axis(side=1, at=axTicks(1), 
+     labels=formatC(axTicks(1), format="d", big.mark=','))
+```
+
+### What do the largest houses look like?
+
+Going into this project, we hypothesized that larger houses would be priced higher than smaller houses. House size is determined in large part by "sqft_living", of which "bathrooms" and "bedrooms" are a part.
+
+It is apparent here that the largest houses are also among the most expensive – they are all priced in the millions of dollars, which are outliers when compared to the dataset as a whole.
+
+```{r top sqftliv, echo=FALSE}
+top2 <- top_n(kc_house_data, 5, sqft_living) %>% arrange(desc(sqft_living))
+datatable(top2, rownames = FALSE, options = list(pageLength = 5, scrollX=T))
+
+```
+
+The properties with the largest amount of land are also priced highly, but not as highly as those listed in the "sqft_living" readout. This could suggest a lower correlation between housing price and sqft_lot than that between housing price and sqft_living.
+
+```{r top sqftlot, echo=FALSE}
+top3 <- top_n(kc_house_data, 5, sqft_lot) %>% arrange(desc(sqft_lot))
+datatable(top3, rownames = FALSE, options = list(pageLength = 5, scrollX=T))
+```
+   
+The properties with the largest number of bedrooms are also priced highly (around or above the dataset mean of $540,000), but not quite as highly as those in the "sqft_living" readout. Since "bedrooms" contributes in part – but not in whole – to sqft_living, it makes sense that its correlation with housing price is lower than that of sqft_living.
+
+```{r top bedrooms, echo=FALSE}
+top4 <- top_n(kc_house_data, 4, bedrooms) %>% arrange(desc(bedrooms))
+datatable(top4, rownames = FALSE, options = list(pageLength = 5, scrollX=T))
+```
+
+
+# Chapter 4: Independent Variables EDA: Boxplots, Scatterplots, ANOVA, & Chi-Square
+## SMART Question: **Are houses of different sizes priced differently?**
+
+Now that we've taken a look at slices of the data, we can now delve deeper with some graphs. Below are scatterplots and boxplots of housing price vs. "sqft_living".
+
+### Comparison of sqft living with price
+
+From the scatterplot, it's apparent that there is a relatively strong, positive correlation between housing price and living space (.70192, to be exact). That is, as living space increases, so does housing price. Note that a majority of the data points lie below 6,000 sqft, and below $2 million.
+
+```{r plot sqft living, echo=FALSE}
+
+plot(kc_house_data$sqft_living, kc_house_data$price, xaxt="n", yaxt="n", pch = 20, cex = .1, xlab = "Square Feet of Living Space", ylab = "Housing Price ($)", cex.axis = .75, main = "Housing Price vs. Living Space")
+abline(lm(kc_house_data$price ~ kc_house_data$sqft_living, data = kc_house_data), col = "orange")
+legend(x='topright', legend=paste('Correlation =',round(cor(kc_house_data$sqft_living, kc_house_data$price),5)))
+axis(side=1, at=axTicks(1), 
+     labels=formatC(axTicks(1), format="d", big.mark=','))
+axis(side=2, at=axTicks(2), 
+     labels=formatC(axTicks(2), format="d", big.mark=','))
+```
+
+Now let's take a look at the same data with a boxplot; this time, we have "sqft_living" categorized by 5 intervals. From this visualization as well, it's apparent that "sqft_living" correlates positively with housing price. The last interval (10,891-13,540 sqft) seems to buck this trend, but it worth noting that only `r nrow(kc_house_data[kc_house_data$sqft_living >= 10891, ])` houses are part of this group – a small-n population, which could explain the discrepancy.
+
+
+```{r boxplot sqft living, echo=FALSE}
+
+sqft.living <- cut(kc_house_data$sqft_living, breaks = c(289,2940,5590,8240,10890,13540), labels = c("290-2,940", "2,941-5,590", "5,591-8,240", "8,241-10,890", "10,891-13,540"))
+
+ggplotly(ggplotly(ggplot(kc_house_data, aes(x=sqft.living, y=price, fill=sqft.living)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Living Space") + ylab("Housing Price ($)") + xlab("Square Feet of Living Space") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_continuous(labels = comma)))
+
+
+```
+   
+Next, we perform the BP Test to determine the homoscedasticity of the different groups to assess if we can perfom an ANOVA test for the differences in mean values between different houses' living space.
+  
+H0: The variances of prices are the same across the different sqft_living levels.  
+H1: The variances of prices are different across the different sqft_living levels.  
+
+```{r anova living, include=FALSE}
+date_p <- bptest(kc_house_data$price~sqft.living)
+date_p$p.value
+```
+Since the p-value is `r date_p$p.value`, which is lower than 0.05, we need to reject the null hypothesis. The variances for different sqft_living levels are different. Thus, the ANOVA test is not applicable.  
+
+### Comparison of sqft lot with price
+
+Next up in our exploratory data analysis is housing price vs. "sqft_lot". How does land area correlate with housing price? According to our scatterplot, not very highly – there is a positive correlation of only .08988. This seems to suggest that sqft_lot is more weakly related to housing price than sqft_living. Indeed, the vast majority of data points in the scatterplot seem to trend upward in price with relatively small increases in land area.
+
+```{r lot summary, include=FALSE}
+summary(kc_house_data$sqft_lot)
+
+```
+
+```{r plot lot, echo=FALSE}
+
+plot(kc_house_data$sqft_lot,kc_house_data$price, cex.axis = .75, pch = 20, cex = .1, xlab = "Land Area (sqft.)", ylab = "Housing Price ($)", xaxt="n", yaxt="n", main = "Housing Price vs. Land Area")
+abline(lm(kc_house_data$price~kc_house_data$sqft_lot, data = kc_house_data), col = "orange")
+legend(x='topright', legend=paste('Correlation =',round(cor(kc_house_data$sqft_lot, kc_house_data$price),5)))
+axis(side=1, at=axTicks(1), 
+     labels=formatC(axTicks(1), format="d", big.mark=','))
+axis(side=2, at=axTicks(2), 
+     labels=formatC(axTicks(2), format="d", big.mark=','))
+
+```
+
+Next, let's take a look at the same data in a boxplot. Unfortunately, the visualization isn't very readable; let's convert housing price through a logarithmic function to improve our y-axis scale.
+
+```{r boxplot lot, echo=FALSE}
+
+sqft.lot <- cut(kc_house_data$sqft_lot, breaks = c(519,330688,660856,991023,1321191, 1651359), labels = c("520-330K", "330K-660K", "660K-991K", "991K-1.3M", "1.3M-1.65M"))
+
+ggplotly(ggplot(kc_house_data, aes(x=sqft.lot, y=price, fill=sqft.lot)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Land Area") + ylab("Housing Price ($)") + xlab("Land Area (sqft.)") +  theme(plot.title= element_text(hjust=0.5, size = 14)))
+
+```
+   
+The modified boxplot below (with the logarithmic scale) is much easier to interpret. We can see that housing price increases as land area increases, but only to an extent. Note that houses in the 991,000-1.3M sqft and 1.3M-1.65M sqft ranges appear to buck the trend. Once again, this can be explained by the fact that only a few houses are part of these two intervals – only `r nrow(kc_house_data[kc_house_data$sqft_lot >= 991000, ])` to be exact.
+
+```{r boxplot lot log, echo=FALSE}
+
+ggplotly(ggplot(kc_house_data, aes(x=sqft.lot, y=price, fill=sqft.lot)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Land Area (log)") + ylab("Housing Price ($)") + xlab("Land Area (sqft.)") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+  
+Thus, we perform the BP Test to determine the homoscedasticity of the different groups to assess if we can perfom an ANOVA test for the differences in mean values between different houses' living space.
+  
+BP test:  
+H0: The variances of prices are the same across the different sqft_lot levels.  
+H1: The variances of prices are different across the different sqft_lot levels.  
+
+ANOVA test:  
+H0: There are no differences between the mean prices of the different sqft.lot levels.  
+H1: The mean prices of the different sqft.lot levels are different.  
+
+```{r anova land}
+
+lot_p <- bptest(kc_house_data$price~sqft.lot)
+lot_p
+land.anova <- aov(kc_house_data$price~sqft.lot)
+summary(land.anova)
+
+TKcond <- TukeyHSD(land.anova)
+TKcond
+```
+Note that the p-value of BP test is `r lot_p$p.value`, which is greater than 0.05. Thus, the variances are the same for different groups. Then we use the ANOVA test to analyze the differences of mean prices. Since the p-value is `r format(pf(7.24, 4, 21591, lower.tail = F), digits = 4)`, which is lower than 0.05, we need to reject the null hypothesis. The mean prices of the different sqft.lot levels are different. From the Turkey test, we can see that the p-values for the following pairs are the lowest: the 660k-991k and 520k-330k, 660k-991k and 330K-660K, 660k-991k and 991K-1.3M. And the p-value for other pairs are very high, which means the mean price of 660k-991k(the median level) are higher than others'. Thus, the land area of 660k-991k are the most popular level for houses in WA. 
+
+
+### Comparison of number of bedrooms with price
+
+Here, we have a logarithmic box plot of housing price vs. "bedrooms". There appears to be a clear trend: as the number of bedrooms increases, housing price increases as well. The 9-11 interval bucks the trend slightly, but again, this can be explained by the fact that only `r nrow(kc_house_data[kc_house_data$bedrooms >= 9, ])` houses are part of this interval, compared with `r nrow(kc_house_data[kc_house_data$bedrooms <= 8, ])` total for the others.
+
+```{r, echo=FALSE}
+
+number.bedrooms <- cut(kc_house_data$bedrooms, breaks = c(0,3,6,9,11), labels = c("1-2", "3-5", "6-8", "9-11"))
+
+ggplotly(ggplot(kc_house_data, aes(x=number.bedrooms, y=price, fill=number.bedrooms)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. # Bedrooms (log)") + ylab("Housing Price ($)") + xlab("# Bedrooms") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+   
+Next, we perform the BP Test to determine the homoscedasticity of the different groups to assess if we can perfom an ANOVA test for the differences in mean values between different houses' living space.
+
+H0: Price variance is the same across bedroom groups.  
+H1: Price variance is different across bedroom groups.    
+
+```{r anova bedrooms, include=FALSE}
+bed_p <- bptest(kc_house_data$price~number.bedrooms)
+bed_p
+```
+Since the p-value is `r bed_p$p.value`, which is lower than 0.05, we need to reject the null hypothesis. The variances for different bedroom groups are different. Thus, the ANOVA test is not applicable.  
+
+Since the anova test is not applicable, we want to use chi-square test to see the correlation between the number of bedrooms and house price. The prices and number of bathrooms are divided into different groups by the cut function to make it categorical, so we can perform the chi-square test on them.
+
+H0: The price and number of bedrooms are independent.  
+H1: The price and number of bedrooms are not independent.  
+
+```{r chisq rooms}
+
+price.intrv = cut(kc_house_data$price, c(0, 250000, 500000, 750000, 1000000, 1250000, 1500000, 1750000, 2000000))
+
+number.bathrooms <- cut(kc_house_data$bathrooms, breaks = c(0,2,4,6,8), labels = c("0.5-1.5", "2-3.5", "4-5.5", "6-8"))
+
+bed_p <- table(number.bedrooms, price.intrv)
+x2test1 = chisq.test(bed_p)
+x2test1
+
+bath_p <- table(number.bathrooms, price.intrv)
+x2test2 = chisq.test(bath_p)
+x2test2
+
+```
+Since both p-values are lower than 0.05, we need to reject the null hypothesis. Thus, the number of bedrooms and the number of bathrooms are not independent from the price of house. They are correlated. Generally, the price increases when the number of bedrooms and bathrooms become greater.
+
+
+## SMART Question: **Are houses of different quality priced differently?**
+
+### Comparison of condition with price
+
+Here, we compare "condition" with housing price. Once again, "condition" represents an index from 1 to 5, with the lowest number representing poor condition. Once we take a look at the boxplot below (the second one is logarithmized for clearer visualization), it becomes clear that apartment condition correlates positively with housing price. 
+
+```{r cond price, echo=FALSE}
+
+ggplotly(ggplot(kc_house_data, aes(x=condition, y=price, fill=condition)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Apartment Condition") + ylab("Housing Price ($)") + xlab("Apartment Condition") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_continuous(labels = comma))
+
+ggplotly(ggplot(kc_house_data, aes(x=condition, y=price, fill=condition)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Apartment Condition (log)") + ylab("Housing Price ($)") + xlab("Apartment Condition") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+  
+Then we do the BP test to see the homoscedasticity for different condition groups.
+
+BP test:  
+H0: Price variance is the same accross different conditions.  
+H1: Price variance is different accross different conditions.  
+
+```{r bp condition, include =FALSE}
+cp <- bptest(price~condition, data = kc_house_data)
+cp
+```
+Since the p-value is `r cp$p.value`, which is greater than 0.05, we failed to reject the null hypothesis. The price variance between different condition groups is the same. The ANOVA test is applicable.
+
+Next we do the ANOVA test to see the mean prices of houses with different condition.
+
+ANOVA test:  
+H0: There are no differences between the mean prices of different conditions.  
+H1: The mean prices of the different conditions are not equal.  
+```{r anova condition}
+cond.anova <- aov(kc_house_data$price~kc_house_data$condition)
+summary(cond.anova)
+
+TKcond <- TukeyHSD(cond.anova)
+TKcond
+```
+Since the p-value is `r format(pf(36.9, 4, 21591, lower.tail = F), digits = 4)`, which is lower than 0.05, we need to reject the null hypothesis. The mean prices of the different conditions are not equal. From the Tukey test we know that conditions 1 and 2 have very large p-values. Other p-values are very low. Basically, the price increases when the condition is better.  
+
+### Comparison of grade with price 
+
+Here we have a boxplot comparing "grade" with housing price. Once again, "grade" represents an index from 1 to 13, with the lowest number representing poor construction and design. The trend is clear: construction and design grade correlate positively with housing price.
+
+```{r, echo=FALSE}
+
+ggplotly(ggplot(kc_house_data, aes(x=grade, y=price, fill=grade)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Apartment Grade (log)") + ylab("Housing Price ($)") + xlab("Apartment Grade") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+  
+Then we do BP test to see if the ANOVA test is applicable.
+
+H0: The variances of prices are the same across different grades.  
+H1: The variances of prices are not equal across different grades.  
+
+```{r anova grade, include=FALSE}
+gp <- bptest(price~grade, data = kc_house_data)
+gp
+```
+Since the p-value is `r format(round(gp$p.value, 4))`, which is lower than 0.05, we need to reject the null hypothesis. The price variance for different grades are not equal. Thus, the ANOVA test is not applicable.  
+ 
+
+Now we want to see whether condition and grade are somehow related; for this, we must perform a chi-square test.
+
+H0: Condition and grade of houses are independent from each other.  
+H1: Condition and grade of house are not independent from each other.
+
+```{r chisq grade}
+
+cond.tbl <- table(kc_house_data$condition, kc_house_data$grade)
+chisq.cond <- chisq.test(cond.tbl)
+chisq.cond
+
+```
+Since the p-value is `r format(round(chisq.cond$p.value, 4))`, which is lower than 0.05, we need to reject the null hypothesis. Thus, condition and grade are not independent. They are correlated. Generally, the grade of construction is better when house conditions are better.
+
+## SMART Question: **Are older houses priced differently?**
+
+### Comparison of year they were built with price
+
+Here, we have a comparison of "yr_built" with housing price. Once we take a look at the logarithmic boxplot, we see no obvious trends. Housing price trends downward from 1900-1969, and then picks back up from 1970-2015. What might explain this? Well, "yr_built" does not take "yr_renovated" into account. For instance, two equivalent houses built in the same year could have different house prices, depending on if one has been renovated while the other hasn't.
+
+```{r, echo=FALSE}
+
+year.built <- cut(kc_house_data$yr_built, breaks = c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+
+ggplotly(ggplot(kc_house_data, aes(x=year.built, y=price, fill=year.built)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Year Built (log)") + ylab("Housing Price ($)") + xlab("Year Built") +  theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+
+*** 
+Let's construct the same boxplots, but this time indexed by "yr_renovated".
+
+```{r yr_built_by_renovation_status, include=FALSE}
+
+norenov <- subset(kc_house_data, kc_house_data$yr_renovated == 0)
+price.ln.noren = log(norenov$price)
+year.built.noren <- cut(norenov$yr_built, breaks = c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+
+```
+
+Unfortunately, the vast majority of properties in this dataset have never been renovated (`r nrow(norenov)` to be exact). This means that only 914 properties have been renovated. This makes the resulting boxplots somewhat uninformative – the larger population boxplot (not renovated) largely mirrors the patterns of the previous graph, and the smaller population graph (renovated) is based on a population too small to run meaningful analysis on. We have included the graphs here to showcase our thought process, but we are well aware of their limitations.
+
+```{r yr_built_by_renovation_status2, echo=FALSE}
+
+norenov <- subset(kc_house_data, kc_house_data$yr_renovated == 0)
+price.ln.noren = log(norenov$price)
+year.built.noren <- cut(norenov$yr_built, breaks = c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+
+ggplotly(ggplot(norenov, aes(x=year.built.noren, y=price, fill=year.built.noren)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Not Renovated Housing Price vs. Years Built(log)") + ylab("Housing Price ($)") + xlab("Year Built") + theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+renov <- subset(kc_house_data, kc_house_data$yr_renovated != 0)
+price.ln.ren = log(renov$price)
+year.built.ren <- cut(renov$yr_built, breaks = c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+
+ggplotly(ggplot(renov, aes(x=year.built.ren, y=price, fill=year.built.ren)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Renovated Housing Price vs. Years Built(log)") + ylab("Housing Price ($)") + xlab("Year Built") + theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+  
+Thus, we want to get more insights into the significance of the differences we may observe throughout all these graphs and we then attempt an ANOVA test for renovated houses aggregated by yr_built.
+
+We perform the BP Test to determine the homoscedasticity of the different groups to assess if we can perfom an ANOVA test for different periods of construction, which results in a high p-value allowing us to conduct the ANOVA for differences in price among older and newer renovated houses.
+  
+H0: There are no differences between the mean prices of the different yr_built renovated houses.  
+H1: The mean prices of the different yr_built renovated houses are different.  
+
+```{r bp renov, include=FALSE}
+yr_BRP <- kc_house_data[c('price', 'yr_built', 'yr_renovated')]
+yr_BRP$yr_built = cut(yr_BRP$yr_built, breaks=c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+yr_R <- subset(yr_BRP, yr_renovated!=0)
+bptest(data=yr_R, price~yr_built)
+```
+
+```{r anova renov}
+yr_R.anova <- aov(data=yr_R, price~yr_built)
+summary(yr_R.anova)
+t <- TukeyHSD(yr_R.anova)
+t
+```
+
+Since the p-value is `r format(pf(2.4, 4, 909, lower.tail = F), digits = 4)`, which is less than 0.05, we need to reject the null hypothesis. Thus, the prices of the renovated are different across yr_built. From the Tukey test, we can see that only the mean price of renovated houses built in 1970-1992 and in 1924-1946 are different from each other. Although given a p-value fairly higher compared to the rest obtained in this analysis, we can also notice that with a more conservative significance level we would not find differences significant among the various years of constructions of the houses renovated, which is reasonable given the fact that most houses were renovated around the same period and thus more likely to be priced similarly.  
+Even though we could not perform an ANOVA test for the overall sample of houses by yr_built because of bp test results in that case, the boxplots confirm the possibility that also there would be no significant differences in price between older and newer houses, regardless their renovation status provided in this sample.
+ 
+### Comparison of year renovated with price
+
+Here, we've graphed housing price by yr_renovated itself. This graph also showcases only 914 properties – the ones that were renovated. Generally speaking, as "yr_renovated" approaches the present day, price increases. The exception is between the 1924-1946 and 1947-1969 intervals; note however, that only `r nrow(kc_house_data[kc_house_data$yr_renovated >0 & kc_house_data$yr_renovated <= "1946", ])` properties occupy the first interval.
+
+```{r price_by_year_renovated}
+
+year.renov.noren <- cut(renov$yr_renovated, breaks = c(1899,1923,1946,1969,1992,2015), labels = c("1900-1923", "1924-1946", "1947-1969", "1970-1992", "1993-2015"))
+
+ggplotly(ggplot(renov, aes(x=year.renov.noren, y=price, fill=year.renov.noren)) + geom_boxplot() + scale_fill_brewer(palette="Spectral") + ggtitle("Housing Price vs. Years Renovated(log)") + ylab("Housing Price ($)") + xlab("Year Renovated") + theme(plot.title= element_text(hjust=0.5, size = 14)) + scale_y_log10(labels = function(x) format(x,nsmall = 2,scientific = FALSE, big.mark = ',')))
+
+```
+  
+
+
+# Chapter 5: Multiple Linear Regression Model
+
+## SMART Question: What factors influence the house price the most?
+
+### LSRL Model building
+
+Below is our regression model, along with a comprehensive correlation plot.
+
+#### First, take a look at all numeric variables and their correlation.
+
+```{r}
+h2 <- subset(kc_house_data,select = c(price,bedrooms,bathrooms,sqft_living,sqft_lot,floors,sqft_above,sqft_basement,yr_built ))
+hcor = cor(h2)
+corrplot(hcor, method = "number", type="upper")
+```
+ 
+yr_built and sqft_lot seem unrelated to price as their correlation coefficient is almost 0; accordingly, we do not choose them as independent variables to predict house price.
+
+
+```{r}
+model1 <- lm(price~.-sqft_lot-yr_built,data=h2)
+summary(model1)
+```
+The coefficient of "sqft_basement" is NA, which indicates it has a problem with the other variables, so we dropped this one. And the p-value of "bathroom" is too large (meaning it's insignificant), so we dropped this one as well.
+
+
+```{r}
+model2 <- lm(price~.-sqft_lot-yr_built-sqft_basement-bathrooms,data=h2)
+summary(model2)
+vif(model2)
+```
+
+Everything looks better now; we also checked the VIF value of each variable and none of them is too large, indicating no  multicollineraty. We then added the two factor variables ("grade" and "condition") into the dataset to see their effects.
+
+```{r}
+h3 <- subset(kc_house_data,select = c(price,bedrooms,sqft_living,sqft_above,floors,grade,condition) )
+summary(h3)
+```
+
+```{r}
+model3 <- lm(price~.,data=h3)
+summary(model3)
+vif(model3)
+```
+
+The 5 levels of the "condition" variable are all insignificant, so we can drop the "condition" variable. For the "grade" variable, higher grade levels have significant effects on price. By contrast, low grade does not affect price significantly. 
+
+```{r}
+model11 <- lm(price~.-condition,data=h3)
+summary(model11)
+vif(model11)
+```
+Now, we've added the interaction term into the model, since we want to see if the correlation of variables would affect the price prediction. We first put all interactions into the model to see what would happen.
+
+```{r}
+h4<-subset(kc_house_data,select=c(price,bedrooms,sqft_living,sqft_above,floors,grade))
+model4<-lm(price~.+bedrooms:sqft_living+bedrooms:floors+bedrooms:sqft_above+sqft_living:floors+sqft_living:sqft_above+floors:sqft_above,data = h4)
+summary(model4)
+vif(model4)
+```
+
+We dropped the insignificant interactions and some interactions would cause certain variables to be insignificant as well, so we also drop these variables. Here is what's left; this model seems nice. 
+
+```{r digit=9}
+model5<-lm(price~.+bedrooms:sqft_above+sqft_living:sqft_above,data = h4)
+summary(model5)
+vif(model5)
+```
+
+### Final results and approved model for prediction of price
+
+**Price = 142000 +bedrooms*(-31710+10.72*sqft_above)+sqft_living*(170+2.943*sqft_above)+sqft_above*(-228.6)*+floors*14570*+grade()**
+
+Problem: As the price histogram above is quite left-skewed, it means there are many outliers whose price is very high in the dataset. While we built the model, we did not exclude the outliers as we considered these values important. As a result, our final model is also skewed a bit. It means that for low price houses, our model may predict higher-than-normal prices, and for high price houses, our model will predict lower-than-normal prices. 
+
+
+# Chapter 6: Conclusion
+
+This analysis provided many insights into the dynamics of the housing market in the Seattle area. After conducting EDA on most of the variables in the dataset, and after considering the possible interactions among them, we were able to narrow down better questions to assess what could actually cause price fluctuations for houses in the area. In particular, we realized how few houses had been renovated (or at least recorded as such); to account for the small differences in price between older and newer houses, we suppose that older houses may have some historical value, and are thus priced comparably to newer buildings.  
+
+As we proceeded with hypothesis analysis, we were able to confirm the expected answers to most of our questions: price was influenced by sqft, quality, and age (age only to an extent). Also notably, we found the following from our ANOVA and chi-square analysis: 1) different property sizes yield different housing prices; 2) different conditions yield different housing prices; 3) different yr_built yields different housing prices within the “renovated” subset (although considering the limited insights from this finding); 4) price is dependent on the number of bedrooms and bathrooms; 5) condition and grade are not independent. Finally, our regression model uncovered additional elements to predict housing price with (such as sqft_above and floors), making it possible to run through future datasets and adjust for better predictive power.  
+
+We believe that more extensive information on renovation may have provided useful insights to assess the actual correlation between yr_built and housing price. Further details on unclear variable definitions could have also made this analysis and the data behind it stronger and more replicable. Moving forward, it would be interesting to compare our model's price predictions with actual prices from following years. It would also be interesting to replicate this study in different cities across the United States; would the same variables have the same effects on housing price elsewhere? Or do our results apply exclusively to Seattle? An additional study might also consider what variables affect the rate at which housing price change in Seattle and other American cities; although outside the scope of our study, this is an important question to consider, since the rate of housing price change could affect people's perception of cities' long-term livability, and thus the cities' demographics themselves. Indeed, nothing less than the future viability of our cities is at stake here; this is why we have chosen to study this topic, and is why we hope others will choose to, as well.
+
+
+# Bibliography
+
+Perry, M. J. (2016, June 5). New US homes today are 1,000 square feet larger than in 1973 and living space per person has nearly doubled. Retrieved from https://www.aei.org/carpe-diem/new-us-homes-today-are-1000-square-feet-larger-than-in-1973-and-living-space-per-person-has-nearly-doubled/
+
+Roberts, D. (n.d.). Variance and Standard Deviation. Retrieved from https://mathbitsnotebook.com/Algebra1/StatisticsData/STSD.html
+
+Rosenberg, M. (2018, July 31). Seattle-area home prices this spring rose at fastest rate since 2006 bubble. The Seattle Times. Retrieved from https://www.seattletimes.com/business/real-estate/seattle-area-home-prices-this-spring-rose-at-fastest-rate-since-2006-bubble/
+
+
